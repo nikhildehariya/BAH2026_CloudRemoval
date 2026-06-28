@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Data directories (raw, processed) and test assets
+data/raw/
+data/processed/
+assets/
+data/
+*.tif
+*.png
+*.zip
+
+# Virtual Environment folder
+venv/
+.env
+.venv
+env/
+ENV/
+
+# System files
+.DS_Store
+Thumbs.db
