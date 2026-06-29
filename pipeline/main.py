@@ -245,19 +245,16 @@ def run_pipeline():
             # Compress to latents
             z_opt = ae.reparameterize(*ae.encode(opt_tensor))
             
-            # Map SAR (2 channels) to prior latent (4 channels) using padding/convolutions
-            # For simulation, we create a condition latent matching the spatial dimensions
-            z_cond = torch.zeros_like(z_opt)
-            z_cond[:, :2] = F.interpolate(sar_tensor, size=z_opt.shape[2:], mode='bilinear')
+            # Interpolate SAR (2 channels) directly as the conditioning latent
+            z_cond = F.interpolate(sar_tensor, size=z_opt.shape[2:], mode='bilinear')
             
             mask_lat = F.interpolate(mask_tensor, size=z_opt.shape[2:], mode='nearest')
             
             # Denoise via Latent Diffusion
             z_recon = diffusion_loop.sample_reverse(z_cond, mask_lat)
             
-            # Reconstruction equation: blend input + conditional SAR structures
-            # We inject some high-frequency detail from SAR into the reconstructed zones
-            z_final = (1.0 - mask_lat) * z_opt + mask_lat * (z_recon * 0.15 + z_cond * 0.85)
+            # Reconstruction equation: blend input + reconstructed zones
+            z_final = (1.0 - mask_lat) * z_opt + mask_lat * z_recon
             
             # Decode reconstructed latents back to image space
             patch_recon = ae.decode(z_final).squeeze(0).cpu().numpy()

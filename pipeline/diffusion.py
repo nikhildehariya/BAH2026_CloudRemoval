@@ -84,7 +84,7 @@ class DecoupledCrossAttention(nn.Module):
     self-attention logits (-1e9 logit masks) and heavily prioritizes spatial structural keys/values
     streaming from Sentinel-1 SAR paths. If M=0, it suppresses SAR keys.
     """
-    def __init__(self, channels: int, cond_channels: int = 4, num_heads: int = 4, bias: bool = True):
+    def __init__(self, channels: int, cond_channels: int = 2, num_heads: int = 4, bias: bool = True):
         super(DecoupledCrossAttention, self).__init__()
         self.channels = channels
         self.cond_channels = cond_channels
@@ -138,25 +138,25 @@ class DecoupledCrossAttention(nn.Module):
         k = torch.cat([k_self, k_cross], dim=2)
         v = torch.cat([v_self, v_cross], dim=2)
         
-        # Calculate attention similarity logits: (B, h, N, 2N)
-        logits = (q @ k.transpose(-2, -1)) * self.scale
-        
         # Dynamic Spatial Masking:
         # Suppress optical self-attention keys (j < N) under cloud (mask=1)
         # Suppress SAR cross-attention keys (j >= N) under clear sky (mask=0)
         m = mask_latent.reshape(B, 1, 1, N) # (B, 1, 1, N)
         
-        attn_mask = torch.zeros(B, 1, 1, 2 * N, device=z_opt.device)
+        attn_mask = torch.zeros(B, 1, 1, 2 * N, device=z_opt.device, dtype=q.dtype)
         attn_mask[:, :, :, :N] = m * -1e9          # suppress self-attention where cloudy
         attn_mask[:, :, :, N:] = (1.0 - m) * -1e9  # suppress SAR features where clear-sky
         
-        # Apply mask
-        logits = logits + attn_mask
+        # Call PyTorch's native memory-efficient scaled dot product attention
+        # Drops the memory footprint from O(N^2) to O(N) by invoking FlashAttention/Memory-Efficient kernels
+        out = F.scaled_dot_product_attention(
+            q, k, v, 
+            attn_mask=attn_mask,
+            dropout_p=0.0,
+            is_causal=False
+        ) # Shape: (B, num_heads, N, head_dim)
         
-        # Softmax & output projection
-        attn_weights = F.softmax(logits, dim=-1)
-        out = (attn_weights @ v).transpose(1, 2).reshape(B, N, C)
-        
+        out = out.transpose(1, 2).reshape(B, N, C)
         out = self.out_proj(out).reshape(B, H, W, C).permute(0, 3, 1, 2)
         return out
 
@@ -196,7 +196,7 @@ class RestormerBlock(nn.Module):
     Restormer Transformer block integrating Decoupled Spatial Masked Cross-Attention
     and Multi-Dilation Gated Feed-Forward network.
     """
-    def __init__(self, channels: int, cond_channels: int = 4, num_heads: int = 4):
+    def __init__(self, channels: int, cond_channels: int = 2, num_heads: int = 4):
         super(RestormerBlock, self).__init__()
         self.norm1 = nn.LayerNorm(channels)
         self.attn = DecoupledCrossAttention(channels=channels, cond_channels=cond_channels, num_heads=num_heads)
@@ -242,7 +242,7 @@ class LatentDiffusionUNet(nn.Module):
     Sinusoidal time-embedded Denoising U-Net containing encoder-decoder Down/Up Conv2D blocks
     and Multi-Dilation Restormer attention modules, resolving skip connections.
     """
-    def __init__(self, latent_channels: int = 4, cond_channels: int = 4, model_channels: int = 64):
+    def __init__(self, latent_channels: int = 4, cond_channels: int = 2, model_channels: int = 64):
         super(LatentDiffusionUNet, self).__init__()
         
         # Sinusoidal time MLP projection
@@ -348,7 +348,8 @@ class LatentDiffusionLoop:
         """
         device = cond.device
         B, C, H, W = cond.shape
-        z_t = torch.randn_like(cond)
+        # Initialize noise with the correct 4 optical latent channels
+        z_t = torch.randn(B, 4, H, W, device=device)
         
         for t_idx in reversed(range(self.num_timesteps)):
             t = torch.tensor([[t_idx]], dtype=torch.float32, device=device).expand(B, 1)
@@ -393,7 +394,7 @@ if __name__ == "__main__":
     
     # UNet
     t = torch.tensor([[5.0]]).to(device)
-    z_cond = torch.rand_like(z)
+    z_cond = torch.rand(1, 2, z.shape[2], z.shape[3]).to(device)
     mask_lat = F.interpolate(mask, size=z.shape[2:], mode='nearest')
     
     noise_pred = unet(z, t, z_cond, mask_lat)
