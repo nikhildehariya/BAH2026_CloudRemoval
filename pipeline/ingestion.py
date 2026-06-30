@@ -11,14 +11,35 @@ import requests
 import rasterio
 from typing import Dict, List, Tuple, Any, Optional
 from datetime import datetime
+import time
+import threading
 
 # Setup Logger
 logger = logging.getLogger("DhruvaPipeline.Ingestion")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
-import time
-import threading
+def load_env_file(filepath: str = ".env"):
+    """
+    Parses a local .env file securely and populates os.environ.
+    Ensures zero hardcoding and zero dependencies on python-dotenv.
+    """
+    for path in [filepath, os.path.join(os.path.dirname(__file__), "..", filepath)]:
+        if os.path.exists(path):
+            try:
+                with open(path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            key, val = line.split("=", 1)
+                            os.environ[key.strip()] = val.strip().strip('"').strip("'")
+                logger.info(f"Loaded credentials securely from {os.path.abspath(path)}")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to parse env file at {path}: {e}")
+
+# Load environment keys upon module import
+load_env_file()
 
 class BhoonidhiClient:
     """
@@ -34,8 +55,8 @@ class BhoonidhiClient:
 
     def __init__(self, api_url: str = "https://bhoonidhi-api.nrsc.gov.in", username: Optional[str] = None, password: Optional[str] = None):
         self.api_url = api_url.rstrip('/')
-        self.username = username
-        self.password = password
+        self.username = username or os.environ.get("BHOONIDHI_USERID")
+        self.password = password or os.environ.get("BHOONIDHI_PASSWORD")
         self.session = requests.Session()
         
         # Token caching state
