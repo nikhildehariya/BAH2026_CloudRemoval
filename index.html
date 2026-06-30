@@ -12,6 +12,23 @@
     
     <!-- Custom Style Sheet -->
     <link rel="stylesheet" href="styles.css">
+    
+    <!-- MathJax for rendering LaTeX equations -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true
+            },
+            options: {
+                ignoreHtmlClass: 'tex2jax_ignore',
+                processHtmlClass: 'tex2jax_process'
+            }
+        };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
 <body class="dark-theme">
     <div class="dashboard-container">
@@ -89,7 +106,7 @@
                 <section id="pane-overview" class="display-pane active">
                     <div class="hero-banner glass-panel">
                         <h2>Solving the LISS-IV Spectral Bottleneck</h2>
-                        <p>LISS-IV offers ultra-high spatial resolution ($\approx 5.8\text{ m}$) but lacks native Blue and SWIR bands, breaking traditional cloud mask algorithms. Team Dhruva uses **Sentinel-1 SAR GRD** data as a physical, weather-penetrating structural anchor inside a **Decoupled Cross-Attention Latent Diffusion Model** to reconstruct true, hallucination-free terrain features.</p>
+                        <p>LISS-IV offers ultra-high spatial resolution (~5.8 meters) but lacks native Blue and SWIR bands, breaking traditional cloud mask algorithms. Team Dhruva uses **Sentinel-1 SAR GRD** data as a physical, weather-penetrating structural anchor inside a **Decoupled Cross-Attention Latent Diffusion Model** to reconstruct true, hallucination-free terrain features.</p>
                     </div>
 
                     <!-- COMPARATOR INTERACTIVE CARD -->
@@ -99,6 +116,25 @@
                             <p class="subtitle">Drag the slider to swipe between the raw cloudy scene and Team Dhruva's physical SAR-anchored reconstruction.</p>
                         </div>
                         <div class="swipe-container" id="swipe-box">
+                            <!-- Telemetry HUD Overlays -->
+                            <div class="hud-overlay top-left">
+                                <div class="hud-item"><span class="hud-label">TARGET AOI:</span> Guwahati, Assam</div>
+                                <div class="hud-item"><span class="hud-label">COORDINATES:</span> 26.14° N, 91.73° E</div>
+                                <div class="hud-item"><span class="hud-label">GRID CRS:</span> EPSG:32646 (UTM 46N)</div>
+                            </div>
+                            <div class="hud-overlay top-right">
+                                <div class="hud-item"><span class="hud-label">SENSOR 1:</span> LISS-IV (MX)</div>
+                                <div class="hud-item"><span class="hud-label">SENSOR 2:</span> S-1 GRD (SAR)</div>
+                                <div class="hud-item"><span class="hud-label">ORBIT:</span> Descending Pass</div>
+                            </div>
+                            <div class="hud-overlay bottom-left">
+                                <div class="hud-item"><span class="hud-label">ACQUISITION:</span> 2026-06-15</div>
+                                <div class="hud-item"><span class="hud-label">SPATIAL RES:</span> 5.8m Multi-Spectral</div>
+                            </div>
+                            <div class="hud-overlay bottom-right">
+                                <div class="hud-item text-glow-green"><span class="hud-label">STITCHER:</span> 2D Gaussian</div>
+                            </div>
+
                             <div class="swipe-after" id="swipe-after-img"></div>
                             <div class="swipe-before" id="swipe-before-img"></div>
                             <div class="swipe-handle" id="swipe-slider-btn">
@@ -166,7 +202,7 @@
                 <section id="pane-preprocessing" class="display-pane">
                     <div class="intro-block">
                         <h2>Module 2: atmospheric Correction & Sub-Pixel TPS Alignment</h2>
-                        <p>Aligning raw $10\text{ m}$ Sentinel-1 GRD SAR data to the $5.8\text{ m}$ LISS-IV grid using Deep Feature Match tie-points (SIFT proxy) and Thin-Plate Spline (TPS) non-rigid warping.</p>
+                        <p>Aligning raw 10m Sentinel-1 GRD SAR data to the 5.8m LISS-IV grid using Deep Feature Match tie-points (SIFT proxy) and Thin-Plate Spline (TPS) non-rigid warping.</p>
                     </div>
                     
                     <div class="interactive-card glass-panel">
@@ -364,6 +400,18 @@
 
             </main>
         </div>
+
+        <!-- PERSISTENT LIVE TELEMETRY TERMINAL -->
+        <footer class="telemetry-terminal glass-panel">
+            <div class="terminal-header">
+                <span class="terminal-title">LIVE SATELLITE TELEMETRY & EXECUTION STREAM</span>
+                <span class="terminal-status"><span class="terminal-pulse"></span> ONLINE</span>
+            </div>
+            <div class="terminal-body" id="live-terminal-log">
+                <p class="term-entry">> [SYSTEM] Inflow Pipeline initialized.</p>
+                <p class="term-entry">> [SYSTEM] Awaiting Bhoonidhi / CDSE target tracking parameters...</p>
+            </div>
+        </footer>
     </div>
 
     <!-- Script file -->

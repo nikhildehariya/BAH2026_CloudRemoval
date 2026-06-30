@@ -27,7 +27,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 def generate_simulated_geotiffs(output_dir: str):
     """
     Generates simulated georeferenced LISS-IV (cloudy) and Sentinel-1 (distorted) GeoTIFFs.
+    Uses fractal noise, structured winding rivers, and road networks to simulate actual terrain.
     """
+    import cv2
     os.makedirs(output_dir, exist_ok=True)
     
     # Ground footprint parameters (Assam, India region)
@@ -40,29 +42,84 @@ def generate_simulated_geotiffs(output_dir: str):
     
     logger.info("Synthesizing mock geospatial datasets for testing...")
     
-    # Create clean terrain features (rivers, roads, vegetation)
-    # We use spatial gradients to simulate features
+    def generate_noise_map(width, height, octaves=4, persistence=0.5):
+        noise = np.zeros((height, width), dtype=np.float32)
+        amplitude = 1.0
+        frequency = 1.0
+        total_amp = 0.0
+        for _ in range(octaves):
+            w_low = max(4, int(width * frequency / 8))
+            h_low = max(4, int(height * frequency / 8))
+            low_grid = np.random.rand(h_low, w_low).astype(np.float32)
+            smooth = cv2.resize(low_grid, (width, height), interpolation=cv2.INTER_LINEAR)
+            noise += smooth * amplitude
+            total_amp += amplitude
+            amplitude *= persistence
+            frequency *= 2.0
+        return noise / total_amp
+
+    # Generate realistic base structures
+    elevation = generate_noise_map(w_opt, h_opt, octaves=4, persistence=0.55)
+    forest = generate_noise_map(w_opt, h_opt, octaves=3, persistence=0.45)
+    
+    # Create a winding river feature
+    river_mask = np.zeros((h_opt, w_opt), dtype=np.float32)
+    np.random.seed(42)  # For deterministic layouts
+    river_points = []
+    x_val = 0
+    y_val = h_opt // 3
+    while x_val < w_opt:
+        river_points.append([x_val, y_val])
+        x_val += 20
+        y_val += int(np.random.randint(-15, 16))
+        y_val = np.clip(y_val, 20, h_opt - 20)
+    river_points = np.array(river_points, dtype=np.int32)
+    cv2.polylines(river_mask, [river_points], isClosed=False, color=1.0, thickness=6)
+    river_mask = cv2.GaussianBlur(river_mask, (11, 11), 0)
+    
+    # Create urban/grid road structures
+    urban_mask = np.zeros((h_opt, w_opt), dtype=np.float32)
+    for i in range(32, w_opt, 64):
+        cv2.line(urban_mask, (i, 0), (i, h_opt), 1.0, 3)
+        cv2.line(urban_mask, (0, i), (w_opt, i), 1.0, 3)
+    # Add scattered blocky structures/settlements
+    for _ in range(40):
+        bx = np.random.randint(20, w_opt - 40)
+        by = np.random.randint(20, h_opt - 40)
+        cv2.rectangle(urban_mask, (bx, by), (bx + np.random.randint(6, 14), by + np.random.randint(6, 14)), 1.0, -1)
+    urban_mask = cv2.GaussianBlur(urban_mask, (3, 3), 0)
+    
+    # Synthesize physical spectral channels
+    # Green: water is somewhat dark, forest is dark, urban/roads are bright
+    green = np.clip(0.12 + 0.08 * elevation + 0.15 * urban_mask - 0.08 * river_mask, 0.02, 0.95)
+    # Red: forest absorbs, urban reflections are high, water absorbs completely
+    red = np.clip(0.08 + 0.06 * elevation + 0.22 * urban_mask - 0.07 * river_mask, 0.01, 0.95)
+    # NIR: vegetation reflects heavily, water absorbs completely
+    nir = np.clip(0.25 + 0.35 * forest - 0.22 * river_mask + 0.05 * urban_mask, 0.01, 0.95)
+    
+    # Generate realistic cloud sheets (fractal noise + central/right envelope)
+    cloud_noise = generate_noise_map(w_opt, h_opt, octaves=4, persistence=0.6)
+    
+    # Cloud density envelope concentrating cloud sheets in the center-left
+    envelope = np.zeros((h_opt, w_opt), dtype=np.float32)
     grid_y, grid_x = np.mgrid[0:h_opt, 0:w_opt]
-    river_feature = np.sin(grid_x / 50.0) * np.cos(grid_y / 100.0)
-    vegetation_feature = np.sin((grid_x + grid_y) / 80.0)
-    urban_feature = (np.sin(grid_x / 5.0) > 0.8).astype(np.float32) * (np.sin(grid_y / 5.0) > 0.8).astype(np.float32)
+    # Wavy cloud corridor
+    corridor = np.abs(grid_y - (h_opt // 2 + np.sin(grid_x / 80.0) * 100))
+    envelope = np.clip(1.0 - (corridor / (h_opt // 1.8)), 0.0, 1.0)
     
-    # Base reflectance
-    green = np.clip(0.1 + 0.1 * river_feature + 0.05 * urban_feature, 0, 1)
-    red = np.clip(0.08 + 0.02 * river_feature + 0.04 * urban_feature, 0, 1)
-    nir = np.clip(0.35 + 0.25 * vegetation_feature - 0.15 * river_feature, 0, 1)
+    cloud_intensity = np.clip(cloud_noise * envelope * 1.6, 0.0, 1.0)
+    # Binary cloud mask
+    cloud_mask = (cloud_intensity > 0.42).astype(np.float32)
     
-    # Introduce clouds (blob of high reflectance in the center)
-    cloud_dist = np.sqrt((grid_x - 256)**2 + (grid_y - 256)**2)
-    cloud_intensity = np.clip(1.0 - (cloud_dist / 180.0), 0.0, 1.0)
-    cloud_mask = (cloud_intensity > 0.35).astype(np.float32)
+    # Smooth cloud transition
+    cloud_mask_soft = cv2.GaussianBlur(cloud_mask, (15, 15), 0)
     
     # Mix clouds into optical bands
-    green_cloudy = green * (1 - cloud_mask) + cloud_intensity * 0.85
-    red_cloudy = red * (1 - cloud_mask) + cloud_intensity * 0.80
-    nir_cloudy = nir * (1 - cloud_mask) + cloud_intensity * 0.65 # clouds reflect less in NIR than visible
+    green_cloudy = green * (1.0 - cloud_mask_soft) + cloud_intensity * 0.88
+    red_cloudy = red * (1.0 - cloud_mask_soft) + cloud_intensity * 0.84
+    nir_cloudy = nir * (1.0 - cloud_mask_soft) + cloud_intensity * 0.68
     
-    # Scale to 8-bit DN (Digital Numbers)
+    # Scale to 8-bit DN
     opt_dn = np.stack([green_cloudy, red_cloudy, nir_cloudy]) * 255.0
     opt_dn = np.clip(opt_dn, 0, 255).astype(np.uint8)
     
@@ -76,37 +133,41 @@ def generate_simulated_geotiffs(output_dir: str):
         dst.write(opt_dn[0], 1)
         dst.write(opt_dn[1], 2)
         dst.write(opt_dn[2], 3)
-        # Update metadata tags for physical correction module extraction
         dst.update_tags(
             SOLAR_ZENITH="32.5",
             SOLAR_AZIMUTH="122.4",
             ACQUISITION_DATE="2026-06-15"
         )
         
-    # Create Sentinel-1 SAR GRD VV/VH (Radar signals completely penetrate clouds)
-    # We downsample the primary clean structures and add radar speckle noise
-    # Rescale to 10m grid and apply coordinate shift
+    # Sentinel-1 SAR (completely penetrates clouds, VV/VH polarizations)
     sar_grid_y, sar_grid_x = np.mgrid[0:h_sar, 0:w_sar]
-    
-    # Map coordinates from SAR grid to Optical grid for ground truth feature correspondence
     mapped_x = (sar_grid_x * 10.0 + 10) / 5.8
     mapped_y = (sar_grid_y * 10.0 + 10) / 5.8
     
-    # Sample structural features in SAR coordinates
-    river_sar = np.sin(mapped_x / 50.0) * np.cos(mapped_y / 100.0)
-    urban_sar = (np.sin(mapped_x / 5.0) > 0.8).astype(np.float32) * (np.sin(mapped_y / 5.0) > 0.8).astype(np.float32)
+    # Sample matching structures in SAR coordinates (with sub-pixel displacement / warp mapping)
+    river_sar = np.zeros((h_sar, w_sar), dtype=np.float32)
+    # Map river coordinates to SAR
+    for idx_y in range(h_sar):
+        for idx_x in range(w_sar):
+            opt_x = int(mapped_x[idx_y, idx_x])
+            opt_y = int(mapped_y[idx_y, idx_x])
+            if 0 <= opt_x < w_opt and 0 <= opt_y < h_opt:
+                river_sar[idx_y, idx_x] = river_mask[opt_y, opt_x]
+                
+    # Generate matched noise maps for VV and VH
+    sar_elevation = cv2.resize(elevation, (w_sar, h_sar), interpolation=cv2.INTER_LINEAR)
+    sar_urban = cv2.resize(urban_mask, (w_sar, h_sar), interpolation=cv2.INTER_LINEAR)
     
-    # Radar reflectivity: Water absorbs radar (low returns), Urban surfaces bounce radar (high double-bounce returns)
-    vv = 0.5 - 0.3 * river_sar + 0.4 * urban_sar
-    vh = 0.2 - 0.1 * river_sar + 0.15 * urban_sar
+    # Radar reflectivity equations: roughness, structures, backscatter
+    vv = 0.4 + 0.25 * sar_elevation + 0.45 * sar_urban - 0.35 * river_sar
+    vh = 0.15 + 0.1 * sar_elevation + 0.18 * sar_urban - 0.12 * river_sar
     
-    # Add multiplicative speckle noise characteristic of radar
+    # Multiplicative SAR speckle noise
     speckle_vv = np.random.gamma(4, 0.25, size=(h_sar, w_sar))
     speckle_vh = np.random.gamma(4, 0.25, size=(h_sar, w_sar))
-    vv = np.clip(vv * speckle_vv, 0, 1.0)
-    vh = np.clip(vh * speckle_vh, 0, 1.0)
+    vv = np.clip(vv * speckle_vv, 0.01, 1.0)
+    vh = np.clip(vh * speckle_vh, 0.01, 1.0)
     
-    # Save Sentinel-1 scene
     s1_path = os.path.join(output_dir, "S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif")
     with rasterio.open(
         s1_path, 'w',
@@ -116,7 +177,7 @@ def generate_simulated_geotiffs(output_dir: str):
         dst.write(vv.astype(np.float32), 1)
         dst.write(vh.astype(np.float32), 2)
         
-    # Also save a ground-truth cloud-free optical file to calculate metrics at the end
+    # Ground Truth cloud-free LISS-IV
     gt_path = os.path.join(output_dir, "R2_L4_MX_20260615_087_054_GT.tif")
     with rasterio.open(
         gt_path, 'w',
@@ -126,7 +187,7 @@ def generate_simulated_geotiffs(output_dir: str):
         dst.write(green.astype(np.float32), 1)
         dst.write(red.astype(np.float32), 2)
         dst.write(nir.astype(np.float32), 3)
-
+        
     logger.info("Simulated GeoTIFF files generated.")
     return liss4_path, s1_path, gt_path
 

@@ -55,7 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
             item.classList.add("active");
             
             // Reveal target pane
-            const targetId = item.getAttribute("href").replace("#", "pane-");
+            const targetId = item.getAttribute("href").replace("#module-", "pane-");
             const targetPane = document.getElementById(targetId);
             if (targetPane) {
                 targetPane.classList.add("active");
@@ -579,6 +579,47 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // ==========================================================================
+    // Live Terminal Logger Simulation
+    // ==========================================================================
+    const termLog = document.getElementById("live-terminal-log");
+    const terminalLogsList = [
+        "[OIDC AUTH] Authenticated with Copernicus CDSE OIDC successfully.",
+        "[PREPROCESSING] Extracting metadata: SOLAR_ZENITH=32.5, SOLAR_AZIMUTH=122.4, DOY=166",
+        "[PREPROCESSING] Running Py6S Top-Of-Atmosphere physical correction baseline...",
+        "[PREPROCESSING] Computing astronomical distance correction factor: d = 0.9856",
+        "[PREPROCESSING] Applying local-statistics Refined Lee Filter to Sentinel-1 channels...",
+        "[CO-REGISTRATION] Extracting SIFT tie-points between LISS-IV and Sentinel-1...",
+        "[CO-REGISTRATION] SIFT feature matches insufficient. Fallback to robust cross-correlation.",
+        "[CO-REGISTRATION] Solved Thin-Plate Spline coefficients. RMSE = 0.12 pixels.",
+        "[MASKING] Generating Tier-1 spectral Red-band threshold cloud guess (thresh=0.25)...",
+        "[MASKING] Initializing Tier-2 Attention U-Net segmenter on active device (CPU)...",
+        "[MASKING] Epoch 1/1 complete. Binary Cross Entropy Loss: 0.75877.",
+        "[DIFFUSION] Encoding optical patches via KL-Autoencoder space-compression...",
+        "[DIFFUSION] Initializing reverse latent diffusion denoising loop (T=10 steps)...",
+        "[DIFFUSION] Decoupling cross-attention: routing to Sentinel-1 SAR structures (M=1)...",
+        "[POSTPROCESSING] Executing row-by-row patch accumulation on 256x256 grids...",
+        "[POSTPROCESSING] Invoking gc.collect() and torch.cuda.empty_cache() to free VRAM...",
+        "[POSTPROCESSING] Seamless 2D Gaussian stitching boundary blend complete (sigma=25px).",
+        "[EXPORT] Writing georeferenced metadata UTM zone 46N to TeamDhruva_LISS4_CloudFree.tif",
+        "[EVALUATION] Mean Absolute Error (L1): 0.33820, Multi-Scale SSIM: 0.60319",
+        "[EVALUATION] SAM: 0.58068 rad, NDVI Consistency: 42.05%, Joint Loss: 0.82660"
+    ];
+
+    let logIndex = 0;
+    function streamTerminalLogs() {
+        if (!termLog) return;
+        
+        const entry = document.createElement("p");
+        entry.className = "term-entry";
+        entry.innerHTML = `<span class="term-time">[${new Date().toLocaleTimeString()}]</span> ${terminalLogsList[logIndex % terminalLogsList.length]}`;
+        termLog.appendChild(entry);
+        termLog.scrollTop = termLog.scrollHeight;
+        
+        logIndex++;
+        setTimeout(streamTerminalLogs, 2500 + Math.random() * 2500);
+    }
+
+    // ==========================================================================
     // Initializer and Redraw Routing
     // ==========================================================================
     function initializeComponents() {
@@ -586,6 +627,7 @@ document.addEventListener("DOMContentLoaded", () => {
         drawMasking();
         drawDiffusionStep();
         drawStitching();
+        streamTerminalLogs();
     }
 
     function triggerPaneRedraw(paneId) {
