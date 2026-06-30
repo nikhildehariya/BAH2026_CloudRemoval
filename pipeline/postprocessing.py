@@ -62,11 +62,10 @@ class SeamlessStitcher:
     def add_patch(self, window: Window, patch_data: np.ndarray):
         """
         Adds a reconstructed patch to the accumulator grids.
-        
-        Args:
-            window: Rasterio Window detailing the spatial coordinates in the full scene.
-            patch_data: Numpy array of shape (channels, patch_size, patch_size).
         """
+        import gc
+        import torch
+        
         x_off, y_off = window.col_off, window.row_off
         h_w, w_w = window.height, window.width
         
@@ -81,6 +80,11 @@ class SeamlessStitcher:
         # Add to global arrays
         self.image_accumulator[:, y_off:y_off+h_w, x_off:x_off+w_w] += weighted_patch
         self.weight_accumulator[y_off:y_off+h_w, x_off:x_off+w_w] += w_map_cropped
+        
+        # Release cached GPU and RAM tensors
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def get_final_reconstruction(self) -> np.ndarray:
         """

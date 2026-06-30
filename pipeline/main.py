@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from pipeline.ingestion import run_ingestion_pipeline
-from pipeline.preprocessing import AtmosphericCorrection6S, SubPixelCoRegistration, MemorySafePatchEngine
+from pipeline.preprocessing import AtmosphericCorrection6S, SubPixelCoRegistration, MemorySafePatchEngine, refined_lee_filter
 from pipeline.masking import generate_spectral_guess, train_attention_unet, generate_refined_mask
 from pipeline.diffusion import KLAutoencoder, LatentDiffusionUNet, LatentDiffusionLoop
 from pipeline.postprocessing import SeamlessStitcher, export_cloud_optimized_geotiff
@@ -166,6 +166,11 @@ def run_pipeline():
     with rasterio.open(s1_raw) as src:
         s1_vv = src.read(1)
         s1_vh = src.read(2)
+        
+    # Apply Refined Lee Filter to clean speckle noise immediately post-ingestion
+    logger.info("Applying local-statistics Refined Lee Filter to Sentinel-1 VV/VH bands...")
+    s1_vv = refined_lee_filter(s1_vv)
+    s1_vh = refined_lee_filter(s1_vh)
         
     # Upscale SAR to optical grid (5.8m)
     import cv2

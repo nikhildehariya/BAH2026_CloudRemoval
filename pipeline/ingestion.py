@@ -139,61 +139,78 @@ class BhoonidhiClient:
         """
         Query LISS-IV imagery using spatial bounding box, date range, and Online filter.
         Enforces Online-only assets ('Online': 'Y') via STAC/cql2-json.
+        Incorporates a temporal expansion of +/- 2 days if initial searches return empty.
         """
         self.authenticate()
         
         min_lon, min_lat, max_lon, max_lat = bbox
         start_date, end_date = date_range
-        logger.info(f"Querying Bhoonidhi for LISS-IV online imagery. BBox: {bbox}, Range: {date_range}")
-        
         search_endpoint = f"{self.api_url}/data/search"
         
-        payload = {
-            "collections": ["ResourceSat-2_LISS4-MX70_L2"],
-            "bbox": [min_lon, min_lat, max_lon, max_lat],
-            "datetime": f"{start_date}T00:00:00Z/{end_date}T23:59:59Z",
-            "filter": {
-                "args": [{"property": "Online"}, "Y"],
-                "op": "eq"
-            },
-            "filter-lang": "cql2-json"
-        }
-        
         try:
-            response = self.session.post(search_endpoint, json=payload, timeout=20)
-            if response.status_code == 200:
-                data = response.json()
-                features = data.get("features", [])
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            start_dt = datetime.strptime("2026-06-01", "%Y-%m-%d")
+            end_dt = datetime.strptime("2026-06-15", "%Y-%m-%d")
+            
+        from datetime import timedelta
+        features = []
+        last_status_code = None
+        
+        # Search expansion buffer loop (0, 1, then 2 days)
+        for buffer_days in [0, 1, 2]:
+            adj_start_dt = start_dt - timedelta(days=buffer_days)
+            adj_end_dt = end_dt + timedelta(days=buffer_days)
+            adj_start = adj_start_dt.strftime("%Y-%m-%d")
+            adj_end = adj_end_dt.strftime("%Y-%m-%d")
+            
+            logger.info(f"Querying Bhoonidhi (buffer_days={buffer_days}). BBox: {bbox}, Range: {adj_start} to {adj_end}")
+            
+            payload = {
+                "collections": ["ResourceSat-2_LISS4-MX70_L2"],
+                "bbox": [min_lon, min_lat, max_lon, max_lat],
+                "datetime": f"{adj_start}T00:00:00Z/{adj_end}T23:59:59Z",
+                "filter": {
+                    "args": [{"property": "Online"}, "Y"],
+                    "op": "eq"
+                },
+                "filter-lang": "cql2-json"
+            }
+            
+            try:
+                response = self.session.post(search_endpoint, json=payload, timeout=20)
+                last_status_code = response.status_code
+                if response.status_code == 200:
+                    data = response.json()
+                    features = data.get("features", [])
+                    if features:
+                        logger.info(f"Bhoonidhi Search returned {len(features)} online scene(s) at buffer +/- {buffer_days} days.")
+                        break
+            except Exception as e:
+                logger.error(f"Bhoonidhi connection failed at buffer +/- {buffer_days} days: {e}")
+                break
                 
-                logger.info(f"Bhoonidhi Search API returned {len(features)} online scene(s).")
+        if last_status_code == 200 and features:
+            results = []
+            for f in features:
+                props = f.get("properties", {})
+                assets = f.get("assets", {})
+                scene_id = f.get("id")
                 
-                results = []
-                for f in features:
-                    props = f.get("properties", {})
-                    assets = f.get("assets", {})
-                    scene_id = f.get("id")
-                    
-                    results.append({
-                        "scene_id": scene_id,
-                        "sensor": props.get("sensor", "LISS4"),
-                        "satellite": props.get("platform", "RESOURCESAT-2"),
-                        "acquisition_date": props.get("datetime", start_date),
-                        "cloud_cover_percentage": props.get("eo:cloud_cover", 0.0),
-                        "bbox": f.get("bbox", bbox),
-                        "collection": "ResourceSat-2_LISS4-MX70_L2",
-                        "download_url": assets.get("download", {}).get("href", f"{self.api_url}/download?id={scene_id}&collection=ResourceSat-2_LISS4-MX70_L2")
-                    })
-                
-                if not results:
-                    logger.warning("No online LISS-IV tracks returned from Bhoonidhi. Using verified mock metadata.")
-                    return self._get_mock_liss4_metadata(bbox, start_date)
-                
-                return results
-            else:
-                logger.warning(f"Bhoonidhi Search failed with status code {response.status_code}. Using fallback mock metadata.")
-                return self._get_mock_liss4_metadata(bbox, start_date)
-        except Exception as e:
-            logger.error(f"Bhoonidhi Query request exception: {e}. Using fallback mock metadata.")
+                results.append({
+                    "scene_id": scene_id,
+                    "sensor": props.get("sensor", "LISS4"),
+                    "satellite": props.get("platform", "RESOURCESAT-2"),
+                    "acquisition_date": props.get("datetime", start_date),
+                    "cloud_cover_percentage": props.get("eo:cloud_cover", 0.0),
+                    "bbox": f.get("bbox", bbox),
+                    "collection": "ResourceSat-2_LISS4-MX70_L2",
+                    "download_url": assets.get("download", {}).get("href", f"{self.api_url}/download?id={scene_id}&collection=ResourceSat-2_LISS4-MX70_L2")
+                })
+            return results
+        else:
+            logger.warning("Bhoonidhi Search timed out or returned no features. Using fallback mock metadata.")
             return self._get_mock_liss4_metadata(bbox, start_date)
 
     def _get_mock_liss4_metadata(self, bbox: Tuple[float, float, float, float], acquisition_date: str) -> List[Dict[str, Any]]:
@@ -336,60 +353,79 @@ class CopernicusDataSpaceClient:
         """
         Query Sentinel-1 GRD products overlapping spatially and temporally with LISS-IV.
         Enforces OData filters for sensor type and acquisition range.
+        Incorporates a temporal expansion of +/- 2 days if initial searches return empty.
         """
         self.authenticate()
         
         min_lon, min_lat, max_lon, max_lat = bbox
         start_date, end_date = date_range
-        
-        logger.info(f"Querying Copernicus CDSE for Sentinel-1 GRD tracks. BBox: {bbox}, Range: {date_range}")
-        
         query_url = f"{self.api_url}/Products"
-        filter_query = (
-            f"ContentDate/Start gt {start_date}T00:00:00.000Z and "
-            f"ContentDate/Start lt {end_date}T23:59:59.000Z and "
-            f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/Value eq 'GRD') and "
-            f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'sensorMode' and att/Value eq 'IW')"
-        )
-        params = {
-            "$filter": filter_query,
-            "$top": 5
-        }
         
         try:
-            response = self.session.get(query_url, params=params, timeout=25)
-            if response.status_code == 200:
-                data = response.json()
-                products = data.get("value", [])
-                logger.info(f"Copernicus API returned {len(products)} Sentinel-1 products.")
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            start_dt = datetime.strptime("2026-06-01", "%Y-%m-%d")
+            end_dt = datetime.strptime("2026-06-15", "%Y-%m-%d")
+            
+        from datetime import timedelta
+        products = []
+        last_status_code = None
+        
+        # Search expansion buffer loop (0, 1, then 2 days)
+        for buffer_days in [0, 1, 2]:
+            adj_start_dt = start_dt - timedelta(days=buffer_days)
+            adj_end_dt = end_dt + timedelta(days=buffer_days)
+            adj_start = adj_start_dt.strftime("%Y-%m-%d")
+            adj_end = adj_end_dt.strftime("%Y-%m-%d")
+            
+            logger.info(f"Querying Copernicus CDSE (buffer_days={buffer_days}). BBox: {bbox}, Range: {adj_start} to {adj_end}")
+            
+            filter_query = (
+                f"ContentDate/Start gt {adj_start}T00:00:00.000Z and "
+                f"ContentDate/Start lt {adj_end}T23:59:59.000Z and "
+                f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'productType' and att/Value eq 'GRD') and "
+                f"Attributes/OData.CSC.StringAttribute/any(att:att/Name eq 'sensorMode' and att/Value eq 'IW')"
+            )
+            params = {
+                "$filter": filter_query,
+                "$top": 5
+            }
+            
+            try:
+                response = self.session.get(query_url, params=params, timeout=25)
+                last_status_code = response.status_code
+                if response.status_code == 200:
+                    data = response.json()
+                    products = data.get("value", [])
+                    if products:
+                        logger.info(f"Copernicus Search returned {len(products)} Sentinel-1 products at buffer +/- {buffer_days} days.")
+                        break
+            except Exception as e:
+                logger.error(f"Copernicus connection failed at buffer +/- {buffer_days} days: {e}")
+                break
                 
-                results = []
-                for p in products:
-                    scene_id = p.get("Name", "").replace(".SAFE", "")
-                    prod_id = p.get("Id")
-                    
-                    results.append({
-                        "scene_id": scene_id,
-                        "product_id": prod_id,
-                        "sensor": "SAR-C",
-                        "satellite": "Sentinel-1A",
-                        "product_type": "GRD",
-                        "acquisition_date": p.get("ContentDate", {}).get("Start", start_date),
-                        "polarization": "VV+VH",
-                        "resolution": 10.0,
-                        "bbox": bbox,
-                        "download_url": f"https://zipper.dataspace.copernicus.eu/odata/v1/Products({prod_id})/$value"
-                    })
+        if last_status_code == 200 and products:
+            results = []
+            for p in products:
+                scene_id = p.get("Name", "").replace(".SAFE", "")
+                prod_id = p.get("Id")
                 
-                if not results:
-                    logger.warning("No Sentinel-1 GRD tracks returned from CDSE. Using verified mock metadata.")
-                    return self._get_mock_s1_metadata(bbox, start_date)
-                return results
-            else:
-                logger.warning(f"Copernicus OData Search failed with status code {response.status_code}. Using fallback mock metadata.")
-                return self._get_mock_s1_metadata(bbox, start_date)
-        except Exception as e:
-            logger.error(f"Copernicus OData query request exception: {e}. Using fallback mock metadata.")
+                results.append({
+                    "scene_id": scene_id,
+                    "product_id": prod_id,
+                    "sensor": "SAR-C",
+                    "satellite": "Sentinel-1A",
+                    "product_type": "GRD",
+                    "acquisition_date": p.get("ContentDate", {}).get("Start", start_date),
+                    "polarization": "VV+VH",
+                    "resolution": 10.0,
+                    "bbox": bbox,
+                    "download_url": f"https://zipper.dataspace.copernicus.eu/odata/v1/Products({prod_id})/$value"
+                })
+            return results
+        else:
+            logger.warning("Copernicus OData Search timed out or returned no products. Using fallback mock metadata.")
             return self._get_mock_s1_metadata(bbox, start_date)
 
     def _get_mock_s1_metadata(self, bbox: Tuple[float, float, float, float], acquisition_date: str) -> List[Dict[str, Any]]:

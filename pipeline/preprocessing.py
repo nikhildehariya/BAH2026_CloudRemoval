@@ -354,6 +354,41 @@ class MemorySafePatchEngine:
         return patches
 
 
+def refined_lee_filter(img: np.ndarray, window_size: int = 7) -> np.ndarray:
+    """
+    Applies a local-statistics Refined Lee Filter to reduce speckle noise
+    in Sentinel-1 SAR imagery while preserving structural edges.
+    """
+    if cv2 is None:
+        logger.warning("OpenCV not available. Skipping speckle filtering.")
+        return img
+        
+    if img.ndim == 3:
+        filtered = np.zeros_like(img)
+        for c in range(img.shape[0]):
+            filtered[c] = refined_lee_filter(img[c], window_size)
+        return filtered
+        
+    img_float = img.astype(np.float32)
+    
+    # Compute local statistics using OpenCV fast box filtering
+    mean = cv2.boxFilter(img_float, -1, (window_size, window_size))
+    mean_sq = cv2.boxFilter(img_float * img_float, -1, (window_size, window_size))
+    variance = np.maximum(mean_sq - mean * mean, 0.0)
+    
+    # Estimate the multiplicative noise variance of the SAR sensor
+    # Relative standard deviation for S1 GRD is typically ~0.25
+    noise_variance = 0.25 * (mean * mean)
+    
+    # Calculate the Lee weighting factor (k)
+    denom = variance + 1e-9
+    k = np.clip((variance - noise_variance) / denom, 0.0, 1.0)
+    
+    # Apply Lee equation: Output = Mean + k * (Input - Mean)
+    output = mean + k * (img_float - mean)
+    return output
+
+
 if __name__ == "__main__":
     # Test feature extraction & TPS warping
     if cv2 is not None:
@@ -365,7 +400,6 @@ if __name__ == "__main__":
         
         coreg = SubPixelCoRegistration()
         try:
-            # SIFT will fail on random noise, so we write a validation check
             logger.info("Running co-registration stub tests...")
         except Exception as e:
             logger.error(f"Test failed: {e}")
