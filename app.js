@@ -139,7 +139,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     const btnRunQuery = document.getElementById("btn-run-query");
     const queryLogBox = document.getElementById("query-log-box");
-    const bboxSelect = document.getElementById("bbox-selected-val");
+    const bboxSelect = document.getElementById("bbox-select");
     const thumbLiss4 = document.getElementById("thumb-liss4");
     const thumbSar = document.getElementById("thumb-sar");
     const lblLiss4 = document.getElementById("lbl-liss4");
@@ -164,42 +164,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    // Custom BBox Dropdown toggle logic
-    const customDropdown = document.getElementById("bbox-dropdown");
-    const dropdownItems = document.querySelectorAll(".dropdown-item");
-
-    if (customDropdown && bboxSelect) {
-        bboxSelect.addEventListener("click", (e) => {
-            e.stopPropagation();
-            customDropdown.classList.toggle("open");
-        });
-
-        dropdownItems.forEach(item => {
-            item.addEventListener("click", (e) => {
-                e.stopPropagation();
-                
-                // Toggle active items
-                dropdownItems.forEach(i => i.classList.remove("active"));
-                item.classList.add("active");
-                
-                // Update selected HUD element
-                const val = item.getAttribute("data-value");
-                bboxSelect.textContent = item.textContent;
-                bboxSelect.setAttribute("data-value", val);
-                
-                customDropdown.classList.remove("open");
-            });
-        });
-
-        document.addEventListener("click", () => {
-            customDropdown.classList.remove("open");
-        });
-    }
-
     if (btnRunQuery && queryLogBox) {
         btnRunQuery.addEventListener("click", () => {
             queryLogBox.innerHTML = "";
-            const selectedLoc = bboxSelect ? bboxSelect.getAttribute("data-value") : "assam";
+            const selectedLoc = bboxSelect.value;
             const meta = coordsMap[selectedLoc];
             
             addLog("system", `[BHOONIDHI] Init query for RESOURCESAT-2 LISS-IV sensor, bbox centered at [Lat: ${meta.lat}, Lon: ${meta.lon}]...`);
