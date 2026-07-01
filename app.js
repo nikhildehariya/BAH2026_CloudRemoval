@@ -37,6 +37,25 @@ document.addEventListener("DOMContentLoaded", () => {
         imgs[key].src = assets[key];
     }
 
+    // Fetch dynamic metrics from backend output
+    fetch('./assets/metrics.json')
+        .then(response => {
+            if (!response.ok) throw new Error("Metrics file not found");
+            return response.json();
+        })
+        .then(data => {
+            console.log("Loaded dynamic metrics:", data);
+            const mSam = document.getElementById("metric-sam");
+            const mNdvi = document.getElementById("metric-ndvi");
+            const mSsim = document.getElementById("metric-ssim");
+            if (mSam) mSam.textContent = data.sam;
+            if (mNdvi) mNdvi.textContent = data.ndvi;
+            if (mSsim) mSsim.textContent = data.ssim;
+        })
+        .catch(err => {
+            console.warn("Could not load dynamic metrics, using defaults:", err);
+        });
+
     // ==========================================================================
     // Pane Navigation Switching
     // ==========================================================================

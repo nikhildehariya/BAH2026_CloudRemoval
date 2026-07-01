@@ -105,8 +105,10 @@ class BhoonidhiClient:
 
         # Fallback: full credentials login
         if not self.username or not self.password:
-            logger.warning("Bhoonidhi credentials not provided. Running in search-only / public mode.")
-            return False
+            raise ValueError(
+                "NRSC Bhoonidhi User credentials are not set in the environment (.env). "
+                "Please configure BHOONIDHI_USERID and BHOONIDHI_PASSWORD."
+            )
 
         try:
             logger.info("Requesting fresh Bhoonidhi JWT access token...")
@@ -129,11 +131,13 @@ class BhoonidhiClient:
                 logger.info("Successfully authenticated with NRSC Bhoonidhi Portal API.")
                 return True
             else:
-                logger.error(f"Bhoonidhi auth failed with status code {response.status_code}: {response.text}")
-                return False
+                raise RuntimeError(
+                    f"Bhoonidhi token auth handshake failed with status code {response.status_code}: {response.text}"
+                )
         except Exception as e:
-            logger.error(f"Authentication connection with Bhoonidhi failed: {e}")
-            return False
+            if isinstance(e, (ValueError, RuntimeError)):
+                raise e
+            raise ConnectionError(f"Authentication connection to Bhoonidhi failed: {e}")
 
     def query_liss4(self, bbox: Tuple[float, float, float, float], date_range: Tuple[str, str]) -> List[Dict[str, Any]]:
         """
@@ -210,8 +214,10 @@ class BhoonidhiClient:
                 })
             return results
         else:
-            logger.warning("Bhoonidhi Search timed out or returned no features. Using fallback mock metadata.")
-            return self._get_mock_liss4_metadata(bbox, start_date)
+            raise RuntimeError(
+                f"Bhoonidhi STAC catalog query failed with HTTP status code {last_status_code} or returned empty features. "
+                "Active whitelisting from IP 152.58.58.246 required."
+            )
 
     def _get_mock_liss4_metadata(self, bbox: Tuple[float, float, float, float], acquisition_date: str) -> List[Dict[str, Any]]:
         mock_scene_id = "R2_L4_MX_20260615_087_054"
@@ -293,10 +299,7 @@ class BhoonidhiClient:
                     time.sleep(backoff)
                     backoff = min(backoff * 2, max_backoff)
             
-            logger.warning(f"Download failed after {max_retries} attempts. Generating fallback file placeholder.")
-            with open(filepath, "w") as f:
-                f.write(f"FALLBACK_LISS4_DATA_HEADER_{scene_id}")
-            return filepath
+            raise IOError(f"Bhoonidhi file payload streaming failed after {max_retries} attempts.")
 
 
 class CopernicusDataSpaceClient:
@@ -322,8 +325,10 @@ class CopernicusDataSpaceClient:
         Updates session headers with Authorization Bearer token.
         """
         if not self.username or not self.password:
-            logger.warning("Copernicus CDSE credentials not provided in environment. Running in search-only / public mode.")
-            return False
+            raise ValueError(
+                "Copernicus CDSE credentials are not set in the environment (.env). "
+                "Please configure COPERNICUS_USERNAME and COPERNICUS_PASSWORD."
+            )
 
         try:
             logger.info("Requesting Copernicus OIDC JWT access token...")
@@ -343,11 +348,13 @@ class CopernicusDataSpaceClient:
                 logger.info("Successfully authenticated with Copernicus CDSE OIDC.")
                 return True
             else:
-                logger.error(f"Copernicus OIDC auth failed with status code {response.status_code}: {response.text}")
-                return False
+                raise RuntimeError(
+                    f"Copernicus OIDC authentication failed with HTTP status code {response.status_code}: {response.text}"
+                )
         except Exception as e:
-            logger.error(f"Copernicus OIDC connection failed: {e}")
-            return False
+            if isinstance(e, (ValueError, RuntimeError)):
+                raise e
+            raise ConnectionError(f"Failed to connect to Copernicus CDSE OIDC token gateway: {e}")
 
     def query_sentinel1_grd(self, bbox: Tuple[float, float, float, float], date_range: Tuple[str, str]) -> List[Dict[str, Any]]:
         """
@@ -425,8 +432,9 @@ class CopernicusDataSpaceClient:
                 })
             return results
         else:
-            logger.warning("Copernicus OData Search timed out or returned no products. Using fallback mock metadata.")
-            return self._get_mock_s1_metadata(bbox, start_date)
+            raise RuntimeError(
+                f"Copernicus OData product search query failed with HTTP status code {last_status_code} or returned zero products."
+            )
 
     def _get_mock_s1_metadata(self, bbox: Tuple[float, float, float, float], acquisition_date: str) -> List[Dict[str, Any]]:
         mock_scene_id = "S1A_IW_GRDH_1SDV_20260615T120000_ASC"
@@ -502,20 +510,19 @@ class CopernicusDataSpaceClient:
                 time.sleep(backoff)
                 backoff = min(backoff * 2, max_backoff)
         
-        logger.warning(f"Download failed after {max_retries} attempts. Generating fallback file placeholder.")
-        with open(filepath, "w") as f:
-            f.write(f"FALLBACK_S1_DATA_HEADER_{scene_id}")
-        return filepath
+        raise IOError(f"Copernicus Sentinel-1 file payload streaming failed after {max_retries} attempts.")
 
 
-def load_native_pair(raw_dir: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def load_native_pair(raw_dir: str, liss4_path: Optional[str] = None, s1_path: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Natively reads LISS-IV and Sentinel-1 raw scenes using Rasterio.
     Extracts LISS-IV Band 2 (Green), 3 (Red), 4 (NIR) and Sentinel-1 VV, VH polarization bands.
     Logs and prints array shapes, resolutions, and CRS to the console.
     """
-    liss4_path = os.path.join(raw_dir, "R2_L4_MX_20260615_087_054.tif")
-    s1_path = os.path.join(raw_dir, "S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif")
+    if liss4_path is None:
+        liss4_path = os.path.join(raw_dir, "R2_L4_MX_20260615_087_054.tif")
+    if s1_path is None:
+        s1_path = os.path.join(raw_dir, "S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif")
     
     logger.info(f"Accessing files natively using Rasterio reader...")
     
@@ -593,19 +600,28 @@ def load_native_pair(raw_dir: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
 def run_ingestion_pipeline(bbox: Tuple[float, float, float, float], date_range: Tuple[str, str], output_dir: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
-    Main ingestion execution block to query matching pairs and natively read them.
+    Main ingestion execution block to query matching pairs and download/read them.
+    Runs on live production endpoints using secure environment variables.
     """
-    logger.info("Starting Team Dhruva Ingestion Pipeline...")
+    logger.info("Starting Team Dhruva Ingestion Pipeline (Production Live Mode)...")
     
-    # Run Bhoonidhi & Copernicus search simulations
     bhoonidhi = BhoonidhiClient()
     copernicus = CopernicusDataSpaceClient()
     
-    _ = bhoonidhi.query_liss4(bbox, date_range)
-    _ = copernicus.query_sentinel1_grd(bbox, date_range)
+    # 1. Query Bhoonidhi STAC catalog for LISS-IV online scene
+    liss4_scenes = bhoonidhi.query_liss4(bbox, date_range)
+    # 2. Query CDSE catalog for Sentinel-1 GRD matching product
+    s1_scenes = copernicus.query_sentinel1_grd(bbox, date_range)
     
-    # Load raw tracks natively using rasterio
-    selected_liss4, selected_s1 = load_native_pair(output_dir)
+    # 3. Stream download the matched pairs
+    logger.info(f"Matched {len(liss4_scenes)} LISS-IV scenes and {len(s1_scenes)} Sentinel-1 products.")
+    logger.info("Streaming matched live dataset pair to disk...")
+    
+    liss4_path = bhoonidhi.download_scene(liss4_scenes[0], output_dir)
+    s1_path = copernicus.download_scene(s1_scenes[0], output_dir)
+    
+    # 4. Load raw tracks natively using rasterio
+    selected_liss4, selected_s1 = load_native_pair(output_dir, liss4_path, s1_path)
     
     logger.info("Ingestion pipeline execution complete.")
     return selected_liss4, selected_s1
