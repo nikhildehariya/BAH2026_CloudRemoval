@@ -159,12 +159,15 @@
                         <div class="glass-panel input-controls">
                             <h3>Query Coordinates</h3>
                             <div class="form-group">
-                                <label for="bbox-select">Select Bounding Box (Footprint)</label>
-                                <select id="bbox-select" class="styled-select">
-                                    <option value="assam">Guwahati, Assam (NER High Cloud Dynamics)</option>
-                                    <option value="meghalaya">Shillong, Meghalaya (Tropical Forest Canopy)</option>
-                                    <option value="sikkim">Sikkim Valley (High Topographic Shadows)</option>
-                                </select>
+                                <label>Select Bounding Box (Footprint)</label>
+                                <div class="custom-dropdown" id="bbox-dropdown">
+                                    <div class="dropdown-selected" id="bbox-selected-val" data-value="assam">Guwahati, Assam (NER High Cloud Dynamics)</div>
+                                    <div class="dropdown-options" id="bbox-options-list">
+                                        <div class="dropdown-item active" data-value="assam">Guwahati, Assam (NER High Cloud Dynamics)</div>
+                                        <div class="dropdown-item" data-value="meghalaya">Shillong, Meghalaya (Tropical Forest Canopy)</div>
+                                        <div class="dropdown-item" data-value="sikkim">Sikkim Valley (High Topographic Shadows)</div>
+                                    </div>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label>Date Range Selector</label>
