@@ -351,7 +351,10 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .styled-select, .styled-input {
-    background: rgba(255, 255, 255, 0.05);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: #0c1020;
     border: 1px solid var(--border-color);
     padding: 10px 14px;
     border-radius: var(--radius-md);
@@ -360,6 +363,17 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 13px;
     outline: none;
     transition: var(--transition-smooth);
+    cursor: pointer;
+    position: relative;
+    z-index: 50;
+}
+
+.styled-select option {
+    background-color: #0c1020;
+    color: var(--text-primary);
+    padding: 12px;
+    font-family: var(--font-body);
+    font-size: 13px;
 }
 
 .styled-select:focus, .styled-input:focus {
