@@ -379,6 +379,21 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: 0 0 8px rgba(6, 182, 212, 0.2);
 }
 
+.search-inputs {
+    display: flex;
+    gap: 10px;
+}
+
+.search-inputs input {
+    flex: 1;
+}
+
+.search-btn {
+    padding: 0 15px !important;
+    white-space: nowrap;
+    height: 42px;
+}
+
 .date-inputs, .coord-inputs {
     display: grid;
     grid-template-columns: 1fr 1fr;

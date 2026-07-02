@@ -150,6 +150,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const inputStartDate = document.getElementById("input-start-date");
     const inputEndDate = document.getElementById("input-end-date");
     const inputLocName = document.getElementById("input-loc-name");
+    const inputSearchName = document.getElementById("input-search-name");
+    const btnSearchLoc = document.getElementById("btn-search-loc");
 
     function triggerReverseGeocode() {
         const lat = parseFloat(inputLat.value);
@@ -181,11 +183,60 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    function triggerForwardGeocode() {
+        const query = inputSearchName.value.trim();
+        if (!query) return;
+        
+        btnSearchLoc.disabled = true;
+        btnSearchLoc.textContent = "...";
+        
+        fetch("/api/forward-geocode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Search Failed");
+            return res.json();
+        })
+        .then(data => {
+            if (data.lat && data.lon) {
+                inputLat.value = parseFloat(data.lat).toFixed(4);
+                inputLon.value = parseFloat(data.lon).toFixed(4);
+                // Trigger coordinates change to update resolved address
+                triggerReverseGeocode();
+            } else {
+                if (inputLocName) {
+                    inputLocName.value = "Location not found";
+                }
+            }
+        })
+        .catch(() => {
+            if (inputLocName) {
+                inputLocName.value = "Lookup unavailable";
+            }
+        })
+        .finally(() => {
+            btnSearchLoc.disabled = false;
+            btnSearchLoc.textContent = "Search";
+        });
+    }
+
     if (inputLat && inputLon) {
         inputLat.addEventListener("change", triggerReverseGeocode);
         inputLon.addEventListener("change", triggerReverseGeocode);
         // Trigger on load after visualizer assets are configured
         setTimeout(triggerReverseGeocode, 1000);
+    }
+
+    if (btnSearchLoc && inputSearchName) {
+        btnSearchLoc.addEventListener("click", triggerForwardGeocode);
+        inputSearchName.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                triggerForwardGeocode();
+            }
+        });
     }
 
     if (btnRunQuery && queryLogBox) {

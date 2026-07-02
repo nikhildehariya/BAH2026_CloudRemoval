@@ -138,7 +138,52 @@ def convert_tiff_to_png():
 
 class DashboardAPIHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
-        if self.path == "/api/reverse-geocode":
+        if self.path == "/api/forward-geocode":
+            import urllib.request
+            import urllib.parse
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            params = json.loads(post_data.decode('utf-8'))
+            
+            query = params.get('query', '')
+            query_encoded = urllib.parse.quote(query)
+            
+            url = f"https://nominatim.openstreetmap.org/search?q={query_encoded}&format=json&limit=1"
+            req = urllib.request.Request(
+                url,
+                headers={'User-Agent': 'TeamDhruva-BAH2026-SatelliteCloudRemoval'}
+            )
+            
+            response_data = {
+                "status": "error",
+                "message": "Location not found"
+            }
+            
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    if data and len(data) > 0:
+                        match = data[0]
+                        response_data = {
+                            "status": "success",
+                            "lat": float(match.get('lat')),
+                            "lon": float(match.get('lon')),
+                            "address": match.get('display_name')
+                        }
+            except Exception as e:
+                logger.warning(f"OSM Nominatim forward geocoding failed: {e}")
+                response_data = {
+                    "status": "error",
+                    "message": str(e)
+                }
+                
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+            return
+
+        elif self.path == "/api/reverse-geocode":
             import urllib.request
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
