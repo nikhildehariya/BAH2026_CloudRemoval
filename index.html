@@ -159,18 +159,23 @@
                         <div class="glass-panel input-controls">
                             <h3>Query Coordinates</h3>
                             <div class="form-group">
-                                <label for="bbox-select">Select Bounding Box (Footprint)</label>
-                                <select id="bbox-select" class="styled-select">
-                                    <option value="assam">Guwahati, Assam (NER High Cloud Dynamics)</option>
-                                    <option value="meghalaya">Shillong, Meghalaya (Tropical Forest Canopy)</option>
-                                    <option value="sikkim">Sikkim Valley (High Topographic Shadows)</option>
-                                </select>
+                                <label>Manual Bounding Box Coordinates</label>
+                                <div class="coord-inputs">
+                                    <div class="input-with-label">
+                                        <label for="input-lat" class="sub-label">Latitude</label>
+                                        <input type="number" id="input-lat" class="styled-input" value="26.1400" step="0.0001">
+                                    </div>
+                                    <div class="input-with-label">
+                                        <label for="input-lon" class="sub-label">Longitude</label>
+                                        <input type="number" id="input-lon" class="styled-input" value="91.7300" step="0.0001">
+                                    </div>
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label>Date Range Selector</label>
                                 <div class="date-inputs">
-                                    <input type="date" value="2026-06-01" class="styled-input">
-                                    <input type="date" value="2026-06-15" class="styled-input">
+                                    <input type="date" id="input-start-date" value="2026-06-01" class="styled-input">
+                                    <input type="date" id="input-end-date" value="2026-06-15" class="styled-input">
                                 </div>
                             </div>
                             <button class="primary-btn" id="btn-run-query">Query Bhoonidhi & Copernicus APIs</button>

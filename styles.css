@@ -379,10 +379,23 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: 0 0 8px rgba(6, 182, 212, 0.2);
 }
 
-.date-inputs {
+.date-inputs, .coord-inputs {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
+}
+
+.input-with-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sub-label {
+    font-size: 10px !important;
+    color: var(--text-muted) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .primary-btn {

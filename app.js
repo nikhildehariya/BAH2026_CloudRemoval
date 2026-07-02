@@ -139,58 +139,127 @@ document.addEventListener("DOMContentLoaded", () => {
     // ==========================================================================
     const btnRunQuery = document.getElementById("btn-run-query");
     const queryLogBox = document.getElementById("query-log-box");
-    const bboxSelect = document.getElementById("bbox-select");
     const thumbLiss4 = document.getElementById("thumb-liss4");
     const thumbSar = document.getElementById("thumb-sar");
     const lblLiss4 = document.getElementById("lbl-liss4");
     const lblSar = document.getElementById("lbl-sar");
 
-    // Coordinates metadata map
-    const coordsMap = {
-        assam: {
-            lat: "26.14° N", lon: "91.73° E",
-            liss_id: "R2_L4_MX_20260615_087_054",
-            sar_id: "S1A_IW_GRDH_1SDV_20260615T120000_ASC"
-        },
-        meghalaya: {
-            lat: "25.57° N", lon: "91.88° E",
-            liss_id: "R2_L4_MX_20260612_088_055",
-            sar_id: "S1B_IW_GRDH_1SDV_20260612T120400_ASC"
-        },
-        sikkim: {
-            lat: "27.33° N", lon: "88.61° E",
-            liss_id: "R2_L4_MX_20260608_086_053",
-            sar_id: "S1A_IW_GRDH_1SDV_20260608T115800_ASC"
-        }
-    };
+    // Inputs
+    const inputLat = document.getElementById("input-lat");
+    const inputLon = document.getElementById("input-lon");
+    const inputStartDate = document.getElementById("input-start-date");
+    const inputEndDate = document.getElementById("input-end-date");
 
     if (btnRunQuery && queryLogBox) {
         btnRunQuery.addEventListener("click", () => {
             queryLogBox.innerHTML = "";
-            const selectedLoc = bboxSelect.value;
-            const meta = coordsMap[selectedLoc];
+            btnRunQuery.disabled = true;
+            btnRunQuery.textContent = "Querying Live APIs...";
             
-            addLog("system", `[BHOONIDHI] Init query for RESOURCESAT-2 LISS-IV sensor, bbox centered at [Lat: ${meta.lat}, Lon: ${meta.lon}]...`);
+            const lat = parseFloat(inputLat.value);
+            const lon = parseFloat(inputLon.value);
+            const dateStart = inputStartDate.value;
+            const dateEnd = inputEndDate.value;
             
-            setTimeout(() => {
-                addLog("info", `[BHOONIDHI] Scene found matching search criteria. Cloud cover: 68.5%. ID: ${meta.liss_id}`);
-                addLog("system", `[CDSE] Querying Copernicus database for temporally matched Sentinel-1 GRD track...`);
-            }, 800);
-
-            setTimeout(() => {
-                addLog("info", `[CDSE] Co-incident GRD track located. Match Delta: +3h 12m. ID: ${meta.sar_id}`);
-                addLog("success", `[INGESTION] Download complete. Programmatic pair registered.`);
+            addLog("system", `[INFLOW] Connecting to NRSC Bhoonidhi and Copernicus CDSE OData endpoints...`);
+            addLog("system", `[QUERY] Footprint center coordinates: [Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}]`);
+            addLog("system", `[QUERY] Timeline criteria: ${dateStart} to ${dateEnd}`);
+            
+            // 1. Trigger live query and download API endpoints
+            fetch("/api/query", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ lat, lon, date_start: dateStart, date_end: dateEnd })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error("API Connection Failed (Firewall/Authentication rejected)");
+                return res.json();
+            })
+            .then(data => {
+                // Render query search history logs
+                if (data.logs) {
+                    data.logs.forEach((log, idx) => {
+                        setTimeout(() => {
+                            addLog(log.type, log.msg);
+                        }, idx * 400);
+                    });
+                }
                 
-                // Update UI elements
-                thumbLiss4.style.backgroundImage = `url(${assets.cloudy})`;
-                thumbLiss4.textContent = "";
-                thumbSar.style.backgroundImage = `url(${assets.sarComposite})`;
-                thumbSar.textContent = "";
-                
-                lblLiss4.textContent = `ID: ${meta.liss_id}`;
-                lblSar.textContent = `ID: ${meta.sar_id}`;
-                
-            }, 1800);
+                // Trigger pipeline execution 2 seconds after query completes
+                setTimeout(() => {
+                    addLog("system", `[PIPELINE] Initializing Neural Alignment, Masking & Generative Diffusion Loop...`);
+                    btnRunQuery.textContent = "Processing Pipeline...";
+                    
+                    fetch("/api/run-pipeline", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ lat, lon, date_start: dateStart, date_end: dateEnd })
+                    })
+                    .then(res => {
+                        if (!res.ok) throw new Error("Pipeline Execution Fault");
+                        return res.json();
+                    })
+                    .then(result => {
+                        addLog("success", `[STITCHER] COG export complete. File: ${result.cog_name}`);
+                        addLog("success", `[EVALUATION] Dynamic Performance metrics calculated successfully.`);
+                        
+                        // Update scene label metadata
+                        lblLiss4.textContent = `ID: ${result.liss_id}`;
+                        lblSar.textContent = `ID: ${result.sar_id}`;
+                        
+                        // Update metrics HUD
+                        const mSam = document.getElementById("metric-sam");
+                        const mNdvi = document.getElementById("metric-ndvi");
+                        const mSsim = document.getElementById("metric-ssim");
+                        if (mSam) mSam.textContent = result.metrics.sam;
+                        if (mNdvi) mNdvi.textContent = result.metrics.ndvi;
+                        if (mSsim) mSsim.textContent = result.metrics.ssim;
+                        
+                        // Reload image assets bypassing cache
+                        const ts = new Date().getTime();
+                        assets.cloudy = `./assets/cloudy.png?t=${ts}`;
+                        assets.reconstructed = `./assets/reconstructed.png?t=${ts}`;
+                        assets.groundTruth = `./assets/ground_truth.png?t=${ts}`;
+                        assets.sarVv = `./assets/sar_vv.png?t=${ts}`;
+                        assets.sarComposite = `./assets/sar_composite.png?t=${ts}`;
+                        assets.cloudMask = `./assets/cloud_mask.png?t=${ts}`;
+                        
+                        // Preload and refresh active visualizers
+                        let loaded = 0;
+                        const keys = Object.keys(assets);
+                        keys.forEach(k => {
+                            imgs[k] = new Image();
+                            imgs[k].onload = () => {
+                                loaded++;
+                                if (loaded === keys.length) {
+                                    addLog("success", `[DASHBOARD] Redrawing comparison overlays with newly processed bands!`);
+                                    initializeComponents();
+                                    
+                                    // Update matched ingestion thumb panels
+                                    thumbLiss4.style.backgroundImage = `url(${assets.cloudy})`;
+                                    thumbLiss4.textContent = "";
+                                    thumbSar.style.backgroundImage = `url(${assets.sarComposite})`;
+                                    thumbSar.textContent = "";
+                                    
+                                    btnRunQuery.disabled = false;
+                                    btnRunQuery.textContent = "Query Bhoonidhi & Copernicus APIs";
+                                }
+                            };
+                            imgs[k].src = assets[k];
+                        });
+                    })
+                    .catch(err => {
+                        addLog("error", `[PIPELINE ERROR] ${err.message}`);
+                        btnRunQuery.disabled = false;
+                        btnRunQuery.textContent = "Query Bhoonidhi & Copernicus APIs";
+                    });
+                }, 2500);
+            })
+            .catch(err => {
+                addLog("error", `[CONNECTION REJECTED] ${err.message}`);
+                btnRunQuery.disabled = false;
+                btnRunQuery.textContent = "Query Bhoonidhi & Copernicus APIs";
+            });
         });
     }
 

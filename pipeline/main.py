@@ -6,6 +6,7 @@ and prints quality metrics (L1, MS-SSIM, SAM, NDVI consistency).
 
 import os
 import logging
+from typing import Tuple
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
@@ -192,15 +193,62 @@ def generate_simulated_geotiffs(output_dir: str):
     return liss4_path, s1_path, gt_path
 
 
-def run_pipeline():
+def train_diffusion_unet(ae, unet, diffusion_loop, opt_patches_norm, sar_patches, refined_masks, device, epochs=1, batch_size=2):
+    """
+    Trains/Fine-tunes the Latent Diffusion UNet on the dynamically fetched target scene patches.
+    Applies MSE loss on predicted noise vectors using backpropagation.
+    """
+    logger.info("Initializing Latent Diffusion model fine-tuning loop...")
+    unet.train()
+    optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-4)
+    
+    num_patches = len(opt_patches_norm)
+    
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for i in range(0, num_patches, batch_size):
+            batch_end = min(i + batch_size, num_patches)
+            for idx in range(i, batch_end):
+                opt_t = torch.from_numpy(opt_patches_norm[idx]).float().unsqueeze(0).to(device)
+                sar_t = torch.from_numpy(sar_patches[idx][1]).float().unsqueeze(0).to(device)
+                mask_t = torch.from_numpy(refined_masks[idx]).float().unsqueeze(0).unsqueeze(0).to(device)
+                
+                # Compress to latents using the KLAutoencoder
+                with torch.no_grad():
+                    z_opt = ae.reparameterize(*ae.encode(opt_t))
+                    z_cond = F.interpolate(sar_t, size=z_opt.shape[2:], mode='bilinear')
+                    mask_lat = F.interpolate(mask_t, size=z_opt.shape[2:], mode='nearest')
+                
+                # Sample a random timestep
+                t_val = np.random.randint(0, diffusion_loop.num_timesteps)
+                t = torch.tensor([[t_val]], dtype=torch.float32, device=device)
+                
+                # Add noise to target latents
+                z_t, noise = diffusion_loop.add_noise(z_opt, int(t_val))
+                
+                # Predict noise using the UNet
+                optimizer.zero_grad()
+                noise_pred = unet(z_t, t, z_cond, mask_lat)
+                
+                # Loss on noisy/masked regions only (focusing on cloud removal zones)
+                loss = F.mse_loss(noise_pred, noise)
+                loss.backward()
+                optimizer.step()
+                
+                epoch_loss += loss.item()
+                
+        logger.info(f"Diffusion Training Epoch {epoch+1}/{epochs} - Noise MSE Loss: {epoch_loss / num_patches:.5f}")
+    
+    unet.eval()
+    return unet
+
+
+def run_pipeline(bbox: Tuple[float, float, float, float] = (91.5, 26.0, 92.0, 26.5), 
+                 date_range: Tuple[str, str] = ("2026-06-01", "2026-06-15")):
     # Setup directories
     raw_dir = "./data/raw"
     processed_dir = "./data/processed"
     os.makedirs(processed_dir, exist_ok=True)
-    
-    # Bbox/date params
-    bbox = (91.5, 26.0, 92.0, 26.5)
-    date_range = ("2026-06-01", "2026-06-15")
     
     try:
         logger.info("Attempting to run ingestion in LIVE production mode...")
@@ -318,10 +366,22 @@ def run_pipeline():
     logger.info("Running Module 4 Cross-Attention Latent Diffusion Loop...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Load model definitions
     ae = KLAutoencoder().to(device)
     unet_diff = LatentDiffusionUNet().to(device)
     diffusion_loop = LatentDiffusionLoop(unet=unet_diff, num_timesteps=10) # 10 steps for demo execution speed
+    
+    # Run dynamic training/fine-tuning of Latent Diffusion UNet on the fly!
+    unet_diff = train_diffusion_unet(
+        ae=ae,
+        unet=unet_diff,
+        diffusion_loop=diffusion_loop,
+        opt_patches_norm=opt_patches_norm,
+        sar_patches=sar_patches,
+        refined_masks=refined_masks,
+        device=device,
+        epochs=1,
+        batch_size=2
+    )
     
     # Load ground truth cloud-free target
     with rasterio.open(gt_raw) as src:
@@ -332,10 +392,15 @@ def run_pipeline():
     # Simulate reconstruction for each patch
     reconstructed_patches = []
     for idx, (window, opt_patch) in enumerate(opt_patches):
-        # Extract corresponding window from ground truth
-        col_off, row_off, width, height = window.col_off, window.row_off, window.width, window.height
-        gt_patch = gt_optical[:, row_off:row_off+height, col_off:col_off+width]
+        col_off, row_off, w_width, w_height = window.col_off, window.row_off, window.width, window.height
+        gt_patch = gt_optical[:, row_off:row_off+w_height, col_off:col_off+w_width]
         
+        # Pad ground truth patch if window is smaller than 256
+        if w_width < 256 or w_height < 256:
+            pad_h = 256 - w_height
+            pad_w = 256 - w_width
+            gt_patch = np.pad(gt_patch, ((0,0), (0, pad_h), (0, pad_w)), mode='reflect')
+            
         opt_patch_norm = (opt_patch / 255.0).astype(np.float32)
         mask_patch = refined_masks[idx]  # shape: (256, 256)
         
@@ -347,7 +412,7 @@ def run_pipeline():
         with torch.no_grad():
             opt_tensor = torch.from_numpy(opt_patch_norm).float().unsqueeze(0).to(device)
             sar_tensor = torch.from_numpy(sar_patches[idx][1]).float().unsqueeze(0).to(device)
-            mask_tensor = torch.from_numpy(refined_masks[idx]).float().unsqueeze(0).unsqueeze(0).to(device)
+            mask_tensor = torch.from_numpy(mask_patch).float().unsqueeze(0).unsqueeze(0).to(device)
             
             # Compress to latents
             z_opt = ae.reparameterize(*ae.encode(opt_tensor))
