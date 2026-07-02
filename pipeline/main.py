@@ -25,23 +25,49 @@ logger = logging.getLogger("DhruvaPipeline.Main")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
-def generate_simulated_geotiffs(output_dir: str):
+def generate_simulated_geotiffs(output_dir: str, bbox: Tuple[float, float, float, float] = None, 
+                                date_range: Tuple[str, str] = None):
     """
-    Generates simulated georeferenced LISS-IV (cloudy) and Sentinel-1 (distorted) GeoTIFFs.
+    Generates simulated georeferenced LISS-IV (cloudy) and Sentinel-1 (distorted) GeoTIFFs dynamically.
     Uses fractal noise, structured winding rivers, and road networks to simulate actual terrain.
+    Forces distinct visual patterns for different coordinates by deterministically seeding from coords.
     """
     import cv2
     os.makedirs(output_dir, exist_ok=True)
     
-    # Ground footprint parameters (Assam, India region)
-    crs = 'EPSG:32646' # WGS 84 / UTM zone 46N
-    transform_opt = from_origin(250000, 2900000, 5.8, 5.8)  # 5.8m resolution
-    transform_sar = from_origin(250010, 2900010, 10.0, 10.0) # 10m resolution, slightly offset
+    # Calculate a deterministic seed based on the center of the bounding box
+    if bbox is not None:
+        lon_center = (bbox[0] + bbox[2]) / 2.0
+        lat_center = (bbox[1] + bbox[3]) / 2.0
+        seed = int(abs(lon_center * 1000) + abs(lat_center * 10000)) % 100000
+    else:
+        lon_center = 91.7300
+        lat_center = 26.1400
+        seed = 42
+        
+    np.random.seed(seed)
+    logger.info(f"Generating dynamic georeferenced mock dataset. Coordinates centroid: [{lat_center:.4f}, {lon_center:.4f}]. Seed: {seed}")
+    
+    # Dynamic UTM zone calculation
+    if bbox is not None:
+        zone = int((lon_center + 180) / 6) + 1
+        epsg_code = f"326{zone:02d}" if lat_center >= 0 else f"327{zone:02d}"
+        crs = f"EPSG:{epsg_code}"
+        
+        # Approximate UTM coordinates mapping
+        center_lon_zone = (zone - 1) * 6 - 180 + 3
+        x_origin = 500000 + (lon_center - center_lon_zone) * 111000 * np.cos(np.radians(lat_center))
+        y_origin = lat_center * 111320
+    else:
+        crs = 'EPSG:32646' # WGS 84 / UTM zone 46N
+        x_origin = 250000
+        y_origin = 2900000
+        
+    transform_opt = from_origin(x_origin - 1484, y_origin + 1484, 5.8, 5.8)  # 5.8m resolution
+    transform_sar = from_origin(x_origin - 1500, y_origin + 1500, 10.0, 10.0) # 10m resolution, slightly offset
     
     h_opt, w_opt = 512, 512
     h_sar, w_sar = 300, 300
-    
-    logger.info("Synthesizing mock geospatial datasets for testing...")
     
     def generate_noise_map(width, height, octaves=4, persistence=0.5):
         noise = np.zeros((height, width), dtype=np.float32)
@@ -59,20 +85,19 @@ def generate_simulated_geotiffs(output_dir: str):
             frequency *= 2.0
         return noise / total_amp
 
-    # Generate realistic base structures
+    # Generate base structures (dependent on seeded randomness)
     elevation = generate_noise_map(w_opt, h_opt, octaves=4, persistence=0.55)
     forest = generate_noise_map(w_opt, h_opt, octaves=3, persistence=0.45)
     
     # Create a winding river feature
     river_mask = np.zeros((h_opt, w_opt), dtype=np.float32)
-    np.random.seed(42)  # For deterministic layouts
     river_points = []
     x_val = 0
-    y_val = h_opt // 3
+    y_val = h_opt // 2 + int(np.random.randint(-100, 101))
     while x_val < w_opt:
         river_points.append([x_val, y_val])
         x_val += 20
-        y_val += int(np.random.randint(-15, 16))
+        y_val += int(np.random.randint(-20, 21))
         y_val = np.clip(y_val, 20, h_opt - 20)
     river_points = np.array(river_points, dtype=np.int32)
     cv2.polylines(river_mask, [river_points], isClosed=False, color=1.0, thickness=6)
@@ -80,28 +105,26 @@ def generate_simulated_geotiffs(output_dir: str):
     
     # Create urban/grid road structures
     urban_mask = np.zeros((h_opt, w_opt), dtype=np.float32)
-    for i in range(32, w_opt, 64):
+    road_spacing = int(np.random.randint(48, 80))
+    for i in range(32, w_opt, road_spacing):
         cv2.line(urban_mask, (i, 0), (i, h_opt), 1.0, 3)
         cv2.line(urban_mask, (0, i), (w_opt, i), 1.0, 3)
     # Add scattered blocky structures/settlements
-    for _ in range(40):
+    num_settlements = int(np.random.randint(30, 60))
+    for _ in range(num_settlements):
         bx = np.random.randint(20, w_opt - 40)
         by = np.random.randint(20, h_opt - 40)
         cv2.rectangle(urban_mask, (bx, by), (bx + np.random.randint(6, 14), by + np.random.randint(6, 14)), 1.0, -1)
     urban_mask = cv2.GaussianBlur(urban_mask, (3, 3), 0)
     
     # Synthesize physical spectral channels
-    # Green: water is somewhat dark, forest is dark, urban/roads are bright
     green = np.clip(0.12 + 0.08 * elevation + 0.15 * urban_mask - 0.08 * river_mask, 0.02, 0.95)
-    # Red: forest absorbs, urban reflections are high, water absorbs completely
     red = np.clip(0.08 + 0.06 * elevation + 0.22 * urban_mask - 0.07 * river_mask, 0.01, 0.95)
-    # NIR: vegetation reflects heavily, water absorbs completely
     nir = np.clip(0.25 + 0.35 * forest - 0.22 * river_mask + 0.05 * urban_mask, 0.01, 0.95)
     
     # Generate realistic cloud sheets (fractal noise + central/right envelope)
     cloud_noise = generate_noise_map(w_opt, h_opt, octaves=4, persistence=0.6)
     
-    # Cloud density envelope concentrating cloud sheets in the center-left
     envelope = np.zeros((h_opt, w_opt), dtype=np.float32)
     grid_y, grid_x = np.mgrid[0:h_opt, 0:w_opt]
     # Wavy cloud corridor
@@ -109,10 +132,7 @@ def generate_simulated_geotiffs(output_dir: str):
     envelope = np.clip(1.0 - (corridor / (h_opt // 1.8)), 0.0, 1.0)
     
     cloud_intensity = np.clip(cloud_noise * envelope * 1.6, 0.0, 1.0)
-    # Binary cloud mask
     cloud_mask = (cloud_intensity > 0.42).astype(np.float32)
-    
-    # Smooth cloud transition
     cloud_mask_soft = cv2.GaussianBlur(cloud_mask, (15, 15), 0)
     
     # Mix clouds into optical bands
@@ -120,12 +140,25 @@ def generate_simulated_geotiffs(output_dir: str):
     red_cloudy = red * (1.0 - cloud_mask_soft) + cloud_intensity * 0.84
     nir_cloudy = nir * (1.0 - cloud_mask_soft) + cloud_intensity * 0.68
     
-    # Scale to 8-bit DN
     opt_dn = np.stack([green_cloudy, red_cloudy, nir_cloudy]) * 255.0
     opt_dn = np.clip(opt_dn, 0, 255).astype(np.uint8)
     
+    # Dynamic filenames
+    if date_range is not None:
+        date_str = date_range[0].replace("-", "")
+        acq_date_tag = date_range[0]
+    else:
+        date_str = "20260615"
+        acq_date_tag = "2026-06-15"
+        
+    lat_h = int(abs(lat_center) * 100) % 100
+    lon_h = int(abs(lon_center) * 100) % 100
+    
+    liss_id = f"R2_L4_MX_{date_str}_{lat_h:03d}_{lon_h:03d}"
+    s1_id = f"S1A_IW_GRDH_1SDV_{date_str}T120000_{lat_h:03d}_{lon_h:03d}_ASC"
+    
     # Save cloudy LISS-IV scene
-    liss4_path = os.path.join(output_dir, "R2_L4_MX_20260615_087_054.tif")
+    liss4_path = os.path.join(output_dir, f"{liss_id}.tif")
     with rasterio.open(
         liss4_path, 'w',
         driver='GTiff', height=h_opt, width=w_opt, count=3,
@@ -137,7 +170,7 @@ def generate_simulated_geotiffs(output_dir: str):
         dst.update_tags(
             SOLAR_ZENITH="32.5",
             SOLAR_AZIMUTH="122.4",
-            ACQUISITION_DATE="2026-06-15"
+            ACQUISITION_DATE=acq_date_tag
         )
         
     # Sentinel-1 SAR (completely penetrates clouds, VV/VH polarizations)
@@ -145,9 +178,7 @@ def generate_simulated_geotiffs(output_dir: str):
     mapped_x = (sar_grid_x * 10.0 + 10) / 5.8
     mapped_y = (sar_grid_y * 10.0 + 10) / 5.8
     
-    # Sample matching structures in SAR coordinates (with sub-pixel displacement / warp mapping)
     river_sar = np.zeros((h_sar, w_sar), dtype=np.float32)
-    # Map river coordinates to SAR
     for idx_y in range(h_sar):
         for idx_x in range(w_sar):
             opt_x = int(mapped_x[idx_y, idx_x])
@@ -155,21 +186,18 @@ def generate_simulated_geotiffs(output_dir: str):
             if 0 <= opt_x < w_opt and 0 <= opt_y < h_opt:
                 river_sar[idx_y, idx_x] = river_mask[opt_y, opt_x]
                 
-    # Generate matched noise maps for VV and VH
     sar_elevation = cv2.resize(elevation, (w_sar, h_sar), interpolation=cv2.INTER_LINEAR)
     sar_urban = cv2.resize(urban_mask, (w_sar, h_sar), interpolation=cv2.INTER_LINEAR)
     
-    # Radar reflectivity equations: roughness, structures, backscatter
     vv = 0.4 + 0.25 * sar_elevation + 0.45 * sar_urban - 0.35 * river_sar
     vh = 0.15 + 0.1 * sar_elevation + 0.18 * sar_urban - 0.12 * river_sar
     
-    # Multiplicative SAR speckle noise
     speckle_vv = np.random.gamma(4, 0.25, size=(h_sar, w_sar))
     speckle_vh = np.random.gamma(4, 0.25, size=(h_sar, w_sar))
     vv = np.clip(vv * speckle_vv, 0.01, 1.0)
     vh = np.clip(vh * speckle_vh, 0.01, 1.0)
     
-    s1_path = os.path.join(output_dir, "S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif")
+    s1_path = os.path.join(output_dir, f"{s1_id}.tif")
     with rasterio.open(
         s1_path, 'w',
         driver='GTiff', height=h_sar, width=w_sar, count=2,
@@ -179,7 +207,7 @@ def generate_simulated_geotiffs(output_dir: str):
         dst.write(vh.astype(np.float32), 2)
         
     # Ground Truth cloud-free LISS-IV
-    gt_path = os.path.join(output_dir, "R2_L4_MX_20260615_087_054_GT.tif")
+    gt_path = os.path.join(output_dir, f"{liss_id}_GT.tif")
     with rasterio.open(
         gt_path, 'w',
         driver='GTiff', height=h_opt, width=w_opt, count=3,
@@ -189,7 +217,7 @@ def generate_simulated_geotiffs(output_dir: str):
         dst.write(red.astype(np.float32), 2)
         dst.write(nir.astype(np.float32), 3)
         
-    logger.info("Simulated GeoTIFF files generated.")
+    logger.info(f"Dynamic simulated GeoTIFF files generated: {liss_id}")
     return liss4_path, s1_path, gt_path
 
 
@@ -291,14 +319,23 @@ def run_pipeline(bbox: Tuple[float, float, float, float] = (91.5, 26.0, 92.0, 26
         os.environ["BHOONIDHI_USERID"] = ""
         os.environ["COPERNICUS_USERNAME"] = ""
         
-        # Generate simulated datasets
-        liss4_raw, s1_raw, gt_raw = generate_simulated_geotiffs(raw_dir)
-        # Match metadata values to prevent downstream coordinate exceptions
+        # Clean old files to ensure fresh preview
+        import glob
+        for old_file in glob.glob(os.path.join(raw_dir, "*.tif")):
+            try:
+                os.remove(old_file)
+            except Exception:
+                pass
+                
+        # Generate simulated datasets using the dynamic inputs
+        liss4_raw, s1_raw, gt_raw = generate_simulated_geotiffs(raw_dir, bbox, date_range)
+        
+        # Match metadata values dynamically based on generated files
         selected_liss4 = {
-            "scene_id": "R2_L4_MX_20260615_087_054"
+            "scene_id": os.path.splitext(os.path.basename(liss4_raw))[0]
         }
         selected_s1 = {
-            "scene_id": "S1A_IW_GRDH_1SDV_20260615T120000_ASC"
+            "scene_id": os.path.splitext(os.path.basename(s1_raw))[0]
         }
     
     # 2. Preprocessing

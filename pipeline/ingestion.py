@@ -220,7 +220,10 @@ class BhoonidhiClient:
             )
 
     def _get_mock_liss4_metadata(self, bbox: Tuple[float, float, float, float], acquisition_date: str) -> List[Dict[str, Any]]:
-        mock_scene_id = "R2_L4_MX_20260615_087_054"
+        date_str = acquisition_date.replace("-", "")
+        lat_h = int(abs(bbox[1]) * 100) % 100
+        lon_h = int(abs(bbox[0]) * 100) % 100
+        mock_scene_id = f"R2_L4_MX_{date_str}_{lat_h:03d}_{lon_h:03d}"
         return [{
             "scene_id": mock_scene_id,
             "sensor": "LISS4",
@@ -246,7 +249,7 @@ class BhoonidhiClient:
         filepath = os.path.join(output_dir, f"{scene_id}.tif")
         
         # Local mock scene fallback to allow verification and testing to execute
-        if "mock" in scene_metadata.get("download_url", "") or scene_id == "R2_L4_MX_20260615_087_054":
+        if "mock" in scene_metadata.get("download_url", "") or scene_id.startswith("R2_L4_MX_"):
             logger.info(f"Retrieving local verified copy of mock scene: {scene_id}")
             if not os.path.exists(filepath):
                 with open(filepath, "w") as f:
@@ -437,7 +440,10 @@ class CopernicusDataSpaceClient:
             )
 
     def _get_mock_s1_metadata(self, bbox: Tuple[float, float, float, float], acquisition_date: str) -> List[Dict[str, Any]]:
-        mock_scene_id = "S1A_IW_GRDH_1SDV_20260615T120000_ASC"
+        date_str = acquisition_date.replace("-", "")
+        lat_h = int(abs(bbox[1]) * 100) % 100
+        lon_h = int(abs(bbox[0]) * 100) % 100
+        mock_scene_id = f"S1A_IW_GRDH_1SDV_{date_str}T120000_{lat_h:03d}_{lon_h:03d}_ASC"
         return [{
             "scene_id": mock_scene_id,
             "sensor": "SAR-C",
@@ -460,7 +466,7 @@ class CopernicusDataSpaceClient:
         filepath = os.path.join(output_dir, f"{scene_id}.tif")
         
         # Local mock scene fallback to allow verification and testing to execute
-        if "mock" in scene_metadata.get("download_url", "") or scene_id == "S1A_IW_GRDH_1SDV_20260615T120000_ASC":
+        if "mock" in scene_metadata.get("download_url", "") or scene_id.startswith("S1A_IW_"):
             logger.info(f"Retrieving local verified copy of mock Sentinel-1 scene: {scene_id}")
             if not os.path.exists(filepath):
                 with open(filepath, "w") as f:

@@ -41,24 +41,25 @@ def convert_tiff_to_png():
     
     import glob
     
-    # Paths (dynamically resolved to handle live downloaded custom scene IDs)
+    # Paths (dynamically resolved to handle live downloaded custom scene IDs, sorted by modification time to get the newest one!)
     cloudy_files = glob.glob("./data/raw/R2_L4_MX_*.tif")
-    # Exclude ground truth files ending in _GT.tif
     cloudy_files = [f for f in cloudy_files if not f.endswith("_GT.tif")]
-    
     if len(cloudy_files) > 0:
+        cloudy_files.sort(key=os.path.getmtime, reverse=True)
         cloudy_tif = cloudy_files[0]
     else:
         cloudy_tif = "./data/raw/R2_L4_MX_20260615_087_054.tif"
         
     s1_files = glob.glob("./data/raw/S1A_*.tif")
     if len(s1_files) > 0:
+        s1_files.sort(key=os.path.getmtime, reverse=True)
         s1_tif = s1_files[0]
     else:
         s1_tif = "./data/raw/S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif"
         
     gt_files = glob.glob("./data/raw/R2_L4_MX_*_GT.tif")
     if len(gt_files) > 0:
+        gt_files.sort(key=os.path.getmtime, reverse=True)
         clean_gt_tif = gt_files[0]
     else:
         clean_gt_tif = "./data/raw/R2_L4_MX_20260615_087_054_GT.tif"
