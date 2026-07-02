@@ -138,7 +138,47 @@ def convert_tiff_to_png():
 
 class DashboardAPIHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
-        if self.path == "/api/query":
+        if self.path == "/api/reverse-geocode":
+            import urllib.request
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            params = json.loads(post_data.decode('utf-8'))
+            
+            lat = float(params.get('lat', 26.1400))
+            lon = float(params.get('lon', 91.7300))
+            
+            url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
+            req = urllib.request.Request(
+                url,
+                headers={'User-Agent': 'TeamDhruva-BAH2026-SatelliteCloudRemoval'}
+            )
+            
+            address_str = "Unknown Location"
+            try:
+                with urllib.request.urlopen(req, timeout=5) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    address = data.get('address', {})
+                    city = address.get('city') or address.get('town') or address.get('village') or address.get('county') or ''
+                    state = address.get('state') or ''
+                    country = address.get('country') or ''
+                    parts = [p for p in [city, state, country] if p]
+                    if parts:
+                        address_str = ", ".join(parts)
+            except Exception as e:
+                logger.warning(f"OSM Nominatim reverse geocoding failed: {e}")
+                
+            response_data = {
+                "status": "success",
+                "address": address_str
+            }
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+            return
+
+        elif self.path == "/api/query":
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             params = json.loads(post_data.decode('utf-8'))

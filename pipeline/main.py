@@ -193,12 +193,23 @@ def generate_simulated_geotiffs(output_dir: str):
     return liss4_path, s1_path, gt_path
 
 
-def train_diffusion_unet(ae, unet, diffusion_loop, opt_patches_norm, sar_patches, refined_masks, device, epochs=1, batch_size=2):
+def train_diffusion_unet(ae, unet, diffusion_loop, opt_patches_norm, sar_patches, refined_masks, device, epochs=5, batch_size=2):
     """
     Trains/Fine-tunes the Latent Diffusion UNet on the dynamically fetched target scene patches.
     Applies MSE loss on predicted noise vectors using backpropagation.
     """
     logger.info("Initializing Latent Diffusion model fine-tuning loop...")
+    
+    checkpoint_path = "checkpoints/unet_diff.pth"
+    if os.path.exists(checkpoint_path):
+        try:
+            unet.load_state_dict(torch.load(checkpoint_path, map_location=device))
+            logger.info(f"Successfully loaded pre-trained Latent Diffusion UNet checkpoint from {checkpoint_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load Latent Diffusion UNet checkpoint: {e}. Training from scratch.")
+    else:
+        logger.info("No pre-trained Latent Diffusion UNet checkpoint found. Initializing random weights.")
+
     unet.train()
     optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-4)
     
@@ -240,6 +251,15 @@ def train_diffusion_unet(ae, unet, diffusion_loop, opt_patches_norm, sar_patches
         logger.info(f"Diffusion Training Epoch {epoch+1}/{epochs} - Noise MSE Loss: {epoch_loss / num_patches:.5f}")
     
     unet.eval()
+    
+    # Save checkpoint
+    try:
+        os.makedirs("checkpoints", exist_ok=True)
+        torch.save(unet.state_dict(), checkpoint_path)
+        logger.info(f"Saved fine-tuned Latent Diffusion UNet checkpoint to {checkpoint_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save Latent Diffusion UNet checkpoint: {e}")
+        
     return unet
 
 
@@ -353,8 +373,8 @@ def run_pipeline(bbox: Tuple[float, float, float, float] = (91.5, 26.0, 92.0, 26
     # Prepare datasets for U-Net refinement training
     opt_patches_norm = [(p[1] / 255.0).astype(np.float32) for p in opt_patches]
     
-    # Train lightweight U-Net for refinement (1 epoch for demo speed)
-    unet_mask_model = train_attention_unet(opt_patches_norm, coarse_masks, epochs=1, batch_size=2)
+    # Train lightweight U-Net for refinement (5 epochs for localized adaptation)
+    unet_mask_model = train_attention_unet(opt_patches_norm, coarse_masks, epochs=5, batch_size=2)
     
     # Generate final refined masks
     refined_masks = []
@@ -379,7 +399,7 @@ def run_pipeline(bbox: Tuple[float, float, float, float] = (91.5, 26.0, 92.0, 26
         sar_patches=sar_patches,
         refined_masks=refined_masks,
         device=device,
-        epochs=1,
+        epochs=5,
         batch_size=2
     )
     

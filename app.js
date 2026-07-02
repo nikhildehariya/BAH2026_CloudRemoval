@@ -149,6 +149,44 @@ document.addEventListener("DOMContentLoaded", () => {
     const inputLon = document.getElementById("input-lon");
     const inputStartDate = document.getElementById("input-start-date");
     const inputEndDate = document.getElementById("input-end-date");
+    const inputLocName = document.getElementById("input-loc-name");
+
+    function triggerReverseGeocode() {
+        const lat = parseFloat(inputLat.value);
+        const lon = parseFloat(inputLon.value);
+        if (isNaN(lat) || isNaN(lon)) return;
+        
+        if (inputLocName) {
+            inputLocName.value = "Resolving Location...";
+        }
+        
+        fetch("/api/reverse-geocode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lat, lon })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error();
+            return res.json();
+        })
+        .then(data => {
+            if (inputLocName && data.address) {
+                inputLocName.value = data.address;
+            }
+        })
+        .catch(() => {
+            if (inputLocName) {
+                inputLocName.value = "Unknown Location";
+            }
+        });
+    }
+
+    if (inputLat && inputLon) {
+        inputLat.addEventListener("change", triggerReverseGeocode);
+        inputLon.addEventListener("change", triggerReverseGeocode);
+        // Trigger on load after visualizer assets are configured
+        setTimeout(triggerReverseGeocode, 1000);
+    }
 
     if (btnRunQuery && queryLogBox) {
         btnRunQuery.addEventListener("click", () => {

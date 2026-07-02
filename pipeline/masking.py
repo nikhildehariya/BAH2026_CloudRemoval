@@ -193,6 +193,17 @@ def train_attention_unet(train_patches: List[np.ndarray], train_labels: List[np.
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
     model = AttentionUNet(in_channels=3, out_channels=1).to(device)
+    
+    checkpoint_path = "checkpoints/unet_mask.pth"
+    if os.path.exists(checkpoint_path):
+        try:
+            model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+            logger.info(f"Successfully loaded pre-trained Attention U-Net checkpoint from {checkpoint_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load Attention U-Net checkpoint: {e}. Training from scratch.")
+    else:
+        logger.info("No pre-trained Attention U-Net checkpoint found. Initializing random weights.")
+
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.BCELoss()
     
@@ -213,7 +224,16 @@ def train_attention_unet(train_patches: List[np.ndarray], train_labels: List[np.
         avg_loss = epoch_loss / len(dataset)
         logger.info(f"Epoch {epoch+1}/{epochs} - Binary Cross Entropy Loss: {avg_loss:.5f}")
         
-    logger.info("Attention U-Net training complete.")
+    logger.info("Attention U-Net localized training complete.")
+    
+    # Save checkpoint
+    try:
+        os.makedirs("checkpoints", exist_ok=True)
+        torch.save(model.state_dict(), checkpoint_path)
+        logger.info(f"Saved fine-tuned Attention U-Net checkpoint to {checkpoint_path}")
+    except Exception as e:
+        logger.warning(f"Failed to save Attention U-Net checkpoint: {e}")
+        
     return model
 
 
