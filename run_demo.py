@@ -38,10 +38,30 @@ def convert_tiff_to_png():
         
     os.makedirs(ASSETS_DIR, exist_ok=True)
     
-    # Paths
-    cloudy_tif = "./data/raw/R2_L4_MX_20260615_087_054.tif"
-    s1_tif = "./data/raw/S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif"
-    clean_gt_tif = "./data/raw/R2_L4_MX_20260615_087_054_GT.tif"
+    import glob
+    
+    # Paths (dynamically resolved to handle live downloaded custom scene IDs)
+    cloudy_files = glob.glob("./data/raw/R2_L4_MX_*.tif")
+    # Exclude ground truth files ending in _GT.tif
+    cloudy_files = [f for f in cloudy_files if not f.endswith("_GT.tif")]
+    
+    if len(cloudy_files) > 0:
+        cloudy_tif = cloudy_files[0]
+    else:
+        cloudy_tif = "./data/raw/R2_L4_MX_20260615_087_054.tif"
+        
+    s1_files = glob.glob("./data/raw/S1A_*.tif")
+    if len(s1_files) > 0:
+        s1_tif = s1_files[0]
+    else:
+        s1_tif = "./data/raw/S1A_IW_GRDH_1SDV_20260615T120000_ASC.tif"
+        
+    gt_files = glob.glob("./data/raw/R2_L4_MX_*_GT.tif")
+    if len(gt_files) > 0:
+        clean_gt_tif = gt_files[0]
+    else:
+        clean_gt_tif = "./data/raw/R2_L4_MX_20260615_087_054_GT.tif"
+        
     reconstructed_tif = "./data/processed/TeamDhruva_LISS4_CloudFree.tif"
     
     logger.info("Converting georeferenced TIFF datasets to web-display PNG assets...")
